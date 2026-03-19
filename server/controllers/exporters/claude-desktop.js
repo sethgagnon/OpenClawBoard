@@ -119,74 +119,136 @@ const CONNECTOR_MAP = [
 // ─── Generators ───
 
 function generateSkill(automation, skillContent) {
+  // Follow anthropics/skills skill-creator best practices:
+  // - name: lowercase, hyphens only
+  // - description: "pushy" — include what it does AND when to use it
+  // - Keep SKILL.md under 500 lines with progressive disclosure
+  // - Include "When to Use" section
+  // - Explain the why, not just rigid instructions
+
   const name = automation.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const desc = automation.description || automation.name;
+  const schedule = automation.schedule;
+
+  // Build a rich description for triggering (skill-creator pattern: be pushy)
+  const triggerContexts = [];
+  if (schedule) triggerContexts.push(`runs on schedule (${schedule.humanReadable || schedule.cron})`);
+  triggerContexts.push('when asked to perform this task manually');
+
+  const richDescription = `${desc}. Use ${triggerContexts.join(', or ')}.`;
 
   // Strip OpenClaw-specific references from skill content
-  let body = skillContent || `# ${automation.name}\n\n${desc}`;
+  let body = skillContent || '';
   body = body.replace(/^---\n[\s\S]*?\n---\n?/, ''); // Remove old frontmatter
-  body = body.replace(/\bmessage\s+.*?(telegram|discord|slack|whatsapp)\b[^\n]*/gi, ''); // Remove channel sends
-  body = body.replace(/\bgateway\b[^\n]*/gi, ''); // Remove gateway refs
-
-  const lines = [
-    '---',
-    `name: ${name}`,
-    `description: "${desc.replace(/"/g, '\\"')}"`,
-    '---',
-    '',
-    body.trim(),
-    '',
-    '## Connectors Required',
-    '',
-  ];
+  body = body.replace(/\bmessage\s+.*?(telegram|discord|slack|whatsapp)\b[^\n]*/gi, '');
+  body = body.replace(/\bgateway\b[^\n]*/gi, '');
+  body = body.replace(/\bheartbeat\b[^\n]*/gi, '');
+  body = body.trim();
 
   // Detect connectors
   const fullText = (skillContent || '') + ' ' + desc;
   const connectors = CONNECTOR_MAP.filter(c => c.pattern.test(fullText));
-  if (connectors.length > 0) {
-    for (const c of connectors) {
-      lines.push(`- ${c.coworkConnector}`);
-    }
+
+  const lines = [
+    '---',
+    `name: ${name}`,
+    `description: "${richDescription.replace(/"/g, '\\"')}"`,
+    '---',
+    '',
+    `# ${automation.name}`,
+    '',
+  ];
+
+  // When to Use section (skill-creator best practice)
+  lines.push('## When to Use', '');
+  if (schedule) {
+    lines.push(`This skill is designed to run ${schedule.humanReadable || 'on a schedule'}${schedule.timezone ? ` (${schedule.timezone})` : ''}. It can also be invoked manually when you need to run it on demand.`);
   } else {
-    lines.push('- None detected');
+    lines.push(`Use this skill when you need to: ${desc}.`);
+  }
+  lines.push('');
+
+  // Overview
+  lines.push('## Overview', '', desc, '');
+
+  // Main instructions — preserve the core from original skill
+  if (body) {
+    // Extract just the instructional content (skip title if duplicated)
+    let instructions = body.replace(/^#\s+.*\n+/, ''); // Remove H1 if present
+    lines.push(instructions);
+  } else {
+    lines.push('## Steps', '', `1. ${desc}`, '');
   }
 
-  lines.push('', '## Notes', '', `- Migrated from OpenClaw automation: ${automation.name}`);
+  // Connectors section
+  if (connectors.length > 0) {
+    lines.push('', '## Connectors Required', '');
+    for (const c of connectors) {
+      lines.push(`- **${c.coworkConnector}** — ensure this is enabled in Claude Desktop settings`);
+    }
+    lines.push('');
+  }
+
+  // Migration notes
+  lines.push('## Notes', '');
+  lines.push(`- Migrated from OpenClaw automation: \`${automation.name}\``);
   if (automation.platforms?.openclaw?.model) {
     lines.push(`- Original model: ${automation.platforms.openclaw.model}`);
+  }
+  if (schedule) {
+    lines.push(`- Original schedule: \`${schedule.cron}\` (${schedule.humanReadable})`);
   }
 
   return lines.join('\n');
 }
 
 function generateScheduledTask(automation, skillContent) {
+  // Generate a natural language prompt suitable for Claude Desktop's scheduled task UI.
+  // Per Claude Desktop docs: "Write this the same way you'd write any message in the prompt box."
+  // Keep it conversational, outcome-focused, under 200 words ideally.
+  // Reference connectors by name, be specific about sources/outputs.
+
   const desc = automation.description || automation.name;
   const schedule = automation.schedule;
+  const fullText = (skillContent || '') + ' ' + desc;
+  const connectors = CONNECTOR_MAP.filter(c => c.pattern.test(fullText));
 
   const lines = [];
 
-  // Build a natural language prompt from the description and skill content
-  if (schedule) {
-    lines.push(`${schedule.humanReadable || 'On schedule'}${schedule.timezone ? ` (${schedule.timezone})` : ''}, do the following:`);
-    lines.push('');
-  }
+  // Natural language task description
+  lines.push(desc);
+  lines.push('');
 
-  // Use skill content body if available, otherwise use description
+  // Include key steps from skill content if available
   if (skillContent) {
     let body = skillContent.replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
-    // Extract steps/instructions, skip metadata sections
-    const stepsMatch = body.match(/##?\s*(Steps|Instructions|Workflow|Process|What to do)[\s\S]*$/im);
+    body = body.replace(/^#\s+.*\n+/, ''); // Remove title
+
+    // Extract steps/workflow section
+    const stepsMatch = body.match(/##?\s*(Steps|Instructions|Workflow|Process|What to do)\n+([\s\S]*?)(?=\n##?\s|\n*$)/im);
     if (stepsMatch) {
       lines.push(stepsMatch[0].trim());
     } else {
-      // Use the whole body, trimmed
-      lines.push(body.slice(0, 1500));
+      // Use the body but keep it concise
+      const trimmed = body.slice(0, 1200).trim();
+      if (trimmed) lines.push(trimmed);
     }
-  } else {
-    lines.push(desc);
   }
 
-  return lines.join('\n').trim();
+  // Connector hints
+  if (connectors.length > 0) {
+    lines.push('');
+    lines.push('Use the following connectors: ' + connectors.map(c => c.coworkConnector).join(', ') + '.');
+  }
+
+  // Keep under ~200 words for scheduled tasks
+  let result = lines.join('\n').trim();
+  const words = result.split(/\s+/);
+  if (words.length > 250) {
+    result = words.slice(0, 240).join(' ') + '\n\n[Note: This prompt was truncated. Consider breaking into a skill file for complex workflows.]';
+  }
+
+  return result;
 }
 
 function generateDispatch(automation) {
