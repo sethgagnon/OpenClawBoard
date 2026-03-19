@@ -59,6 +59,7 @@ export function dispatchTask(taskId) {
   const task = tasks.find(t => t.id === taskId);
   if (!task) return { error: 'Task not found' };
   if (task.status === 'in-progress' && task.pickedUp) return { error: 'Task is already running' };
+  if (task.status === 'done') return { error: 'Task is already completed' };
 
   // Check concurrency
   const settings = readSettings();
@@ -103,12 +104,25 @@ export function dispatchTask(taskId) {
     const now = new Date().toISOString();
     const success = code === 0;
 
+    // For failures, try to extract a recommendation from the output
+    let errorMessage = `Agent exited with code ${code}`;
+    let recommendation = null;
+    if (!success) {
+      const output = run.output.trim();
+      if (output) {
+        // Use the agent's last output as context for the error
+        errorMessage = output.slice(-500) || errorMessage;
+      }
+      recommendation = 'Review the error details above. Common fixes: check that required files/APIs are accessible, verify permissions, or simplify the task description and retry.';
+    }
+
     const completedTask = updateTask(taskId, {
-      status: success ? 'done' : 'failed',
+      status: success ? 'done' : 'review',
       completedAt: now,
       pickedUp: false,
       result: success ? run.output.trim() : null,
-      error: success ? null : `Agent exited with code ${code}`,
+      error: success ? null : errorMessage,
+      recommendation: success ? null : recommendation,
     });
 
     if (completedTask) {

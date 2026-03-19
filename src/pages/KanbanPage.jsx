@@ -16,8 +16,8 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   Plus, GripVertical, Calendar, User, Clock,
-  AlertCircle, ChevronRight, Bot, Loader2, Square, Zap,
-  CheckCircle2,
+  AlertCircle, ChevronRight, ChevronLeft, Bot, Loader2, Square, Zap,
+  CheckCircle2, Trash2, ArrowLeftRight,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -30,16 +30,37 @@ import { Input } from '@/components/ui/Input';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/Select';
-import { apiGet, apiPost, apiPut } from '@/lib/api';
+import { apiGet, apiPost, apiPut, apiDelete } from '@/lib/api';
 import { useSocket } from '@/hooks/useSocket';
 import { cn } from '@/lib/utils';
 
-const COLUMNS = [
+const DEFAULT_COLUMNS = [
   { id: 'backlog', label: 'Backlog', color: 'bg-zinc-500' },
   { id: 'todo', label: 'Todo', color: 'bg-blue-500' },
   { id: 'in-progress', label: 'In Progress', color: 'bg-amber-500' },
+  { id: 'review', label: 'For Review', color: 'bg-red-500' },
   { id: 'done', label: 'Done', color: 'bg-emerald-500' },
 ];
+
+const COLUMN_MAP = Object.fromEntries(DEFAULT_COLUMNS.map(c => [c.id, c]));
+
+function loadColumnOrder() {
+  try {
+    const saved = localStorage.getItem('kanban-column-order');
+    if (saved) {
+      const ids = JSON.parse(saved);
+      // Validate all IDs exist and include any new columns
+      const valid = ids.filter(id => COLUMN_MAP[id]);
+      const missing = DEFAULT_COLUMNS.filter(c => !valid.includes(c.id)).map(c => c.id);
+      return [...valid, ...missing].map(id => COLUMN_MAP[id]);
+    }
+  } catch {}
+  return DEFAULT_COLUMNS;
+}
+
+function saveColumnOrder(columns) {
+  localStorage.setItem('kanban-column-order', JSON.stringify(columns.map(c => c.id)));
+}
 
 // Map backend statuses to Kanban column IDs
 function resolveColumnId(status) {
@@ -48,7 +69,7 @@ function resolveColumnId(status) {
     case 'queued': return 'todo';
     case 'running': return 'in-progress';
     case 'completed': return 'done';
-    case 'failed': return 'backlog';
+    case 'failed': return 'review';
     default: return status; // already a column ID
   }
 }
@@ -84,7 +105,7 @@ function parseAgentResult(result) {
 
 // --------------- Task Card (Sortable) ---------------
 
-function SortableTaskCard({ task, onClick, onDispatch, onCancel }) {
+function SortableTaskCard({ task, onClick, onDispatch, onCancel, onDelete }) {
   const {
     attributes,
     listeners,
@@ -102,12 +123,12 @@ function SortableTaskCard({ task, onClick, onDispatch, onCancel }) {
 
   return (
     <div ref={setNodeRef} style={style} {...attributes}>
-      <TaskCardContent task={task} listeners={listeners} onClick={onClick} onDispatch={onDispatch} onCancel={onCancel} />
+      <TaskCardContent task={task} listeners={listeners} onClick={onClick} onDispatch={onDispatch} onCancel={onCancel} onDelete={onDelete} />
     </div>
   );
 }
 
-function TaskCardContent({ task, listeners, onClick, overlay, onDispatch, onCancel }) {
+function TaskCardContent({ task, listeners, onClick, overlay, onDispatch, onCancel, onDelete }) {
   const priority = priorityConfig[task.priority] || priorityConfig.low;
   const isRunning = task.status === 'in-progress' && task.pickedUp;
 
@@ -132,9 +153,23 @@ function TaskCardContent({ task, listeners, onClick, overlay, onDispatch, onCanc
             </button>
           )}
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-foreground leading-snug truncate">
-              {task.title}
-            </p>
+            <div className="flex items-start justify-between gap-1">
+              <p className="text-sm font-medium text-foreground leading-snug truncate">
+                {task.title}
+              </p>
+              {onDelete && !overlay && (
+                <button
+                  className="shrink-0 rounded p-0.5 text-muted-foreground/30 opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                  title="Delete task"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm(`Delete "${task.title}"?`)) onDelete(task.id);
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
             {task.source?.channel && (
               <p className="text-[10px] text-muted-foreground mt-0.5">
                 via {task.source.channel}{task.source.sender ? ` · ${task.source.sender}` : ''}
@@ -175,16 +210,21 @@ function TaskCardContent({ task, listeners, onClick, overlay, onDispatch, onCanc
                 </p>
               </div>
             )}
-            {/* Failed result */}
-            {task.status === 'failed' && task.error && (
-              <div className="mt-2 rounded-md bg-red-500/5 border border-red-500/20 px-2 py-1.5">
+            {/* Failed / Review result */}
+            {(task.status === 'failed' || task.status === 'review') && task.error && (
+              <div className="mt-2 rounded-md bg-red-500/5 border border-red-500/20 px-2 py-1.5 space-y-1">
                 <p className="text-[10px] text-red-500 font-medium flex items-center gap-1">
                   <AlertCircle className="h-3 w-3" />
-                  {task.error}
+                  Needs review
                 </p>
+                {task.recommendation && (
+                  <p className="text-[10px] text-muted-foreground">
+                    {task.recommendation}
+                  </p>
+                )}
               </div>
             )}
-            {/* Dispatch / Cancel buttons */}
+            {/* Dispatch / Cancel / Retry buttons */}
             {(task.status === 'backlog' || task.status === 'todo') && onDispatch && (
               <button
                 className="mt-2 flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
@@ -192,6 +232,15 @@ function TaskCardContent({ task, listeners, onClick, overlay, onDispatch, onCanc
               >
                 <Bot className="h-3 w-3" />
                 Run with Agent
+              </button>
+            )}
+            {(task.status === 'review' || task.status === 'failed') && onDispatch && (
+              <button
+                className="mt-2 flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-500 transition-colors hover:bg-amber-500/20"
+                onClick={(e) => { e.stopPropagation(); onDispatch(task.id); }}
+              >
+                <Zap className="h-3 w-3" />
+                Retry
               </button>
             )}
             {isRunning && onCancel && (
@@ -212,18 +261,38 @@ function TaskCardContent({ task, listeners, onClick, overlay, onDispatch, onCanc
 
 // --------------- Column ---------------
 
-function KanbanColumn({ column, tasks, onTaskClick, onDispatch, onCancel }) {
+function KanbanColumn({ column, tasks, onTaskClick, onDispatch, onCancel, onDelete, onMoveLeft, onMoveRight, isFirst, isLast }) {
   const taskIds = tasks.map((t) => t.id);
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
 
   return (
     <div className="flex flex-col min-w-[260px] w-[260px] sm:min-w-[280px] sm:w-[280px] shrink-0">
-      <div className="flex items-center gap-2 mb-3 px-1">
+      <div className="flex items-center gap-2 mb-3 px-1 group/col">
         <span className={cn('h-2.5 w-2.5 rounded-full', column.color)} />
         <h3 className="text-sm font-semibold text-foreground">{column.label}</h3>
         <span className="text-xs text-muted-foreground bg-muted/50 rounded-full px-2 py-0.5">
           {tasks.length}
         </span>
+        <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover/col:opacity-100 transition-opacity">
+          {!isFirst && (
+            <button
+              onClick={onMoveLeft}
+              className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              title="Move column left"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {!isLast && (
+            <button
+              onClick={onMoveRight}
+              className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              title="Move column right"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
       </div>
       <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
         <div
@@ -245,6 +314,7 @@ function KanbanColumn({ column, tasks, onTaskClick, onDispatch, onCancel }) {
                 onClick={() => onTaskClick(task)}
                 onDispatch={onDispatch}
                 onCancel={onCancel}
+                onDelete={onDelete}
               />
             ))
           )}
@@ -332,6 +402,7 @@ function TaskForm({ onSubmit, onCancel }) {
               <SelectItem value="backlog">Backlog</SelectItem>
               <SelectItem value="todo">Todo</SelectItem>
               <SelectItem value="in-progress">In Progress</SelectItem>
+              <SelectItem value="review">For Review</SelectItem>
               <SelectItem value="done">Done</SelectItem>
             </SelectContent>
           </Select>
@@ -382,7 +453,7 @@ function formatDurationMs(ms) {
 function TaskDetailDialog({ task, open, onOpenChange }) {
   if (!task) return null;
   const priority = priorityConfig[task.priority] || priorityConfig.low;
-  const column = COLUMNS.find((c) => c.id === resolveColumnId(task.status));
+  const column = COLUMN_MAP[resolveColumnId(task.status)];
   const agentResult = parseAgentResult(task.result);
   const lastRun = task.runHistory?.length > 0 ? task.runHistory[task.runHistory.length - 1] : null;
 
@@ -448,7 +519,20 @@ function TaskDetailDialog({ task, open, onOpenChange }) {
                 Error
               </p>
               <div className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3">
-                <p className="text-sm text-destructive">{task.error}</p>
+                <p className="text-sm text-destructive whitespace-pre-wrap">{task.error}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Recommendation */}
+          {task.recommendation && (
+            <div>
+              <p className="text-xs font-medium text-amber-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                <Zap className="h-3.5 w-3.5" />
+                Recommended Action
+              </p>
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-4 py-3">
+                <p className="text-sm text-foreground">{task.recommendation}</p>
               </div>
             </div>
           )}
@@ -499,7 +583,7 @@ function TaskDetailDialog({ task, open, onOpenChange }) {
 function BoardSkeleton() {
   return (
     <div className="flex gap-4 overflow-x-auto pb-4">
-      {COLUMNS.map((col) => (
+      {DEFAULT_COLUMNS.map((col) => (
         <div key={col.id} className="min-w-[280px] w-[280px] shrink-0 space-y-3">
           <div className="flex items-center gap-2 px-1">
             <Skeleton className="h-2.5 w-2.5 rounded-full" />
@@ -507,7 +591,7 @@ function BoardSkeleton() {
             <Skeleton className="h-5 w-6 rounded-full" />
           </div>
           <div className="space-y-2 rounded-lg bg-muted/20 border border-border/30 border-dashed p-2">
-            {Array.from({ length: 3 - (COLUMNS.indexOf(col) % 2) }).map((_, i) => (
+            {Array.from({ length: 3 - (DEFAULT_COLUMNS.indexOf(col) % 2) }).map((_, i) => (
               <Skeleton key={i} className="h-20 w-full rounded-lg" />
             ))}
           </div>
@@ -527,6 +611,7 @@ export default function KanbanPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [detailTask, setDetailTask] = useState(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [columns, setColumns] = useState(loadColumnOrder);
 
   const { subscribe, unsubscribe } = useSocket();
 
@@ -579,7 +664,7 @@ export default function KanbanPage() {
   }, [subscribe, unsubscribe]);
 
   const tasksByColumn = {};
-  for (const col of COLUMNS) {
+  for (const col of columns) {
     tasksByColumn[col.id] = tasks.filter((t) => resolveColumnId(t.status) === col.id);
   }
 
@@ -608,7 +693,7 @@ export default function KanbanPage() {
 
     // Determine destination column
     let destColumn = null;
-    if (COLUMNS.some((c) => c.id === over.id)) {
+    if (columns.some((c) => c.id === over.id)) {
       destColumn = over.id;
     } else {
       destColumn = findColumnForTask(over.id);
@@ -689,6 +774,29 @@ export default function KanbanPage() {
     }
   };
 
+  const handleMoveColumn = (colId, direction) => {
+    setColumns((prev) => {
+      const idx = prev.findIndex(c => c.id === colId);
+      if (idx < 0) return prev;
+      const newIdx = idx + direction;
+      if (newIdx < 0 || newIdx >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
+      saveColumnOrder(next);
+      return next;
+    });
+  };
+
+  const handleDelete = async (taskId) => {
+    try {
+      await apiDelete(`/tasks/${taskId}`);
+      setTasks((prev) => prev.filter((t) => t.id !== taskId));
+    } catch (err) {
+      setError(err.message);
+      setTimeout(() => setError(null), 5000);
+    }
+  };
+
   return (
     <div className="px-3 py-4 sm:p-6 max-w-full mx-auto space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -736,14 +844,19 @@ export default function KanbanPage() {
           onDragEnd={handleDragEnd}
         >
           <div className="flex gap-4 overflow-x-auto pb-4">
-            {COLUMNS.map((column) => (
+            {columns.map((column, idx) => (
               <KanbanColumn
                 key={column.id}
                 column={column}
-                tasks={tasksByColumn[column.id]}
+                tasks={tasksByColumn[column.id] || []}
                 onTaskClick={handleTaskClick}
                 onDispatch={handleDispatch}
                 onCancel={handleCancel}
+                onDelete={handleDelete}
+                onMoveLeft={() => handleMoveColumn(column.id, -1)}
+                onMoveRight={() => handleMoveColumn(column.id, 1)}
+                isFirst={idx === 0}
+                isLast={idx === columns.length - 1}
               />
             ))}
           </div>

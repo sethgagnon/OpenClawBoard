@@ -81,7 +81,7 @@ export function updateTask(req, res) {
     const allowedFields = [
       'title', 'description', 'priority', 'skill', 'skills',
       'status', 'schedule', 'scheduledAt', 'scheduleEnabled',
-      'result', 'error', 'order', 'subagentId',
+      'result', 'error', 'recommendation', 'order', 'subagentId',
     ];
 
     for (const key of allowedFields) {
