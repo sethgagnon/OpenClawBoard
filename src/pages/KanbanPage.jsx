@@ -6,6 +6,7 @@ import {
   useSensor,
   useSensors,
   closestCorners,
+  useDroppable,
 } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -174,6 +175,7 @@ function TaskCardContent({ task, listeners, onClick, overlay, onDispatch, onCanc
 
 function KanbanColumn({ column, tasks, onTaskClick, onDispatch, onCancel }) {
   const taskIds = tasks.map((t) => t.id);
+  const { setNodeRef, isOver } = useDroppable({ id: column.id });
 
   return (
     <div className="flex flex-col min-w-[260px] w-[260px] sm:min-w-[280px] sm:w-[280px] shrink-0">
@@ -185,7 +187,13 @@ function KanbanColumn({ column, tasks, onTaskClick, onDispatch, onCancel }) {
         </span>
       </div>
       <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
-        <div className="flex flex-col gap-2 min-h-[120px] rounded-lg bg-muted/20 border border-border/30 border-dashed p-2">
+        <div
+          ref={setNodeRef}
+          className={cn(
+            'flex flex-col gap-2 min-h-[120px] rounded-lg border border-dashed p-2 transition-colors',
+            isOver ? 'bg-primary/10 border-primary/40' : 'bg-muted/20 border-border/30'
+          )}
+        >
           {tasks.length === 0 ? (
             <div className="flex items-center justify-center h-24 text-xs text-muted-foreground">
               Drop tasks here
@@ -484,42 +492,44 @@ export default function KanbanPage() {
 
   const handleDragStart = (event) => {
     const task = tasks.find((t) => t.id === event.active.id);
-    setActiveTask(task || null);
+    if (task) {
+      // Store the original status before any drag-over mutations
+      setActiveTask({ ...task, _originalStatus: task.status });
+    }
   };
 
   const handleDragEnd = async (event) => {
+    const draggedTask = activeTask;
     setActiveTask(null);
     const { active, over } = event;
-    if (!over) return;
+    if (!over || !draggedTask) return;
 
     const taskId = active.id;
-    const task = tasks.find((t) => t.id === taskId);
-    if (!task) return;
+    const originalColumn = resolveColumnId(draggedTask._originalStatus);
 
     // Determine destination column
     let destColumn = null;
-
-    // Check if dropped over a column id directly
     if (COLUMNS.some((c) => c.id === over.id)) {
       destColumn = over.id;
     } else {
-      // Dropped over another task -- find which column that task is in
       destColumn = findColumnForTask(over.id);
     }
 
-    if (!destColumn || destColumn === task.status) return;
+    if (!destColumn || destColumn === originalColumn) {
+      // Revert the optimistic drag-over update
+      setTasks((prev) =>
+        prev.map((t) => (t.id === taskId ? { ...t, status: draggedTask._originalStatus } : t))
+      );
+      return;
+    }
 
-    // Optimistic update
-    setTasks((prev) =>
-      prev.map((t) => (t.id === taskId ? { ...t, status: destColumn } : t))
-    );
-
+    // Optimistic update already happened in handleDragOver — now persist
     try {
       await apiPut(`/tasks/${taskId}`, { status: destColumn });
     } catch {
       // Revert on failure
       setTasks((prev) =>
-        prev.map((t) => (t.id === taskId ? { ...t, status: task.status } : t))
+        prev.map((t) => (t.id === taskId ? { ...t, status: draggedTask._originalStatus } : t))
       );
     }
   };
