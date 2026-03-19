@@ -112,6 +112,7 @@ export const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 export const AUTH_FILE = path.join(DATA_DIR, 'auth.json');
 export const NOTIFICATIONS_FILE = path.join(DATA_DIR, 'notifications.json');
 export const SUGGESTIONS_HISTORY_FILE = path.join(DATA_DIR, 'suggestions-history.json');
+export const REGISTRY_FILE = path.join(DATA_DIR, 'agent-registry.json');
 
 // Skill directories
 const inferredOpenclawRoot = inferOpenclawInstallRoot(resolvePathExecutable('openclaw'));

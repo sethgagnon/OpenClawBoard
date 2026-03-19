@@ -3,6 +3,17 @@ import path from 'path';
 import { __dirname } from './config.js';
 import { dispatchTask, cancelTask, getActiveRuns, getOpenclawHeartbeatInterval } from './lib/taskDispatcher.js';
 
+// Registry
+import {
+  listPlatforms, listAutomations, getAutomation, createAutomation,
+  updateAutomation, deleteAutomation, getRegistryStats,
+} from './controllers/registry.js';
+import { importStatus, scanOpenClaw, confirmImport } from './controllers/importers/openclaw.js';
+import {
+  generateExport, getSkillArtifact, getScheduledTaskArtifact,
+  getDispatchArtifact, getGapArtifact, saveSkillFile,
+} from './controllers/exporters/claude-desktop.js';
+
 // Controllers
 import { getSystemMetrics } from './controllers/system.js';
 import { getActivity, getActivityHeatmap, getActivityChart, getTime } from './controllers/activity.js';
@@ -138,6 +149,30 @@ router.post('/api/terminal/exec', execTerminalCommand);
 // Settings
 router.get('/api/settings', getSettings);
 router.post('/api/settings', postSettings);
+
+// Platforms
+router.get('/api/platforms', listPlatforms);
+
+// Registry
+router.get('/api/registry/stats', getRegistryStats);
+router.get('/api/registry', listAutomations);
+router.get('/api/registry/:id', getAutomation);
+router.post('/api/registry', createAutomation);
+router.put('/api/registry/:id', updateAutomation);
+router.delete('/api/registry/:id', deleteAutomation);
+
+// Import (OpenClaw)
+router.get('/api/import/openclaw/status', importStatus);
+router.post('/api/import/openclaw/scan', scanOpenClaw);
+router.post('/api/import/openclaw/confirm', confirmImport);
+
+// Export (Claude Desktop)
+router.post('/api/export/claude-desktop/:id', generateExport);
+router.get('/api/export/claude-desktop/:id/skill', getSkillArtifact);
+router.get('/api/export/claude-desktop/:id/scheduled-task', getScheduledTaskArtifact);
+router.get('/api/export/claude-desktop/:id/dispatch', getDispatchArtifact);
+router.get('/api/export/claude-desktop/:id/gaps', getGapArtifact);
+router.post('/api/export/claude-desktop/:id/save', saveSkillFile);
 
 // SPA fallback
 router.get('*', (req, res) => {
