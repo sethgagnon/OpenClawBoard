@@ -4,6 +4,7 @@ import { HOST, PORT, OPENCLAW_DIR, DATA_DIR } from './config.js';
 import { setupWebSocket } from './broadcast.js';
 import { setupMiddleware } from './middleware.js';
 import router from './routes.js';
+import { startHeartbeat } from './lib/taskDispatcher.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -26,4 +27,7 @@ server.listen(PORT, HOST, () => {
   console.log(`  OpenClaw dir: \x1b[90m${OPENCLAW_DIR}\x1b[0m`);
   console.log(`  Data dir:     \x1b[90m${DATA_DIR}\x1b[0m`);
   console.log('');
+
+  // Start heartbeat poller for auto-dispatching Todo tasks
+  startHeartbeat();
 });

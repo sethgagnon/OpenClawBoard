@@ -17,6 +17,7 @@ import { CSS } from '@dnd-kit/utilities';
 import {
   Plus, GripVertical, Calendar, User, Clock,
   AlertCircle, ChevronRight, Bot, Loader2, Square, Zap,
+  CheckCircle2,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -63,6 +64,23 @@ const scheduleLabels = {
   weekly: 'Weekly',
   monthly: 'Monthly',
 };
+
+// --------------- Helpers ---------------
+
+function parseAgentResult(result) {
+  if (!result) return null;
+  try {
+    const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+    const payloads = parsed?.result?.payloads;
+    if (Array.isArray(payloads) && payloads.length > 0) {
+      return payloads[0].text || null;
+    }
+    if (parsed?.summary) return parsed.summary;
+    return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+  } catch {
+    return typeof result === 'string' ? result : null;
+  }
+}
 
 // --------------- Task Card (Sortable) ---------------
 
@@ -145,6 +163,27 @@ function TaskCardContent({ task, listeners, onClick, overlay, onDispatch, onCanc
                 </span>
               )}
             </div>
+            {/* Completed result preview */}
+            {(task.status === 'done' || task.status === 'completed') && task.result && (
+              <div className="mt-2 rounded-md bg-emerald-500/5 border border-emerald-500/20 px-2 py-1.5">
+                <p className="text-[10px] text-emerald-500 font-medium flex items-center gap-1 mb-0.5">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Agent completed
+                </p>
+                <p className="text-[11px] text-muted-foreground line-clamp-2">
+                  {parseAgentResult(task.result)?.slice(0, 120) || 'Done'}
+                </p>
+              </div>
+            )}
+            {/* Failed result */}
+            {task.status === 'failed' && task.error && (
+              <div className="mt-2 rounded-md bg-red-500/5 border border-red-500/20 px-2 py-1.5">
+                <p className="text-[10px] text-red-500 font-medium flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" />
+                  {task.error}
+                </p>
+              </div>
+            )}
             {/* Dispatch / Cancel buttons */}
             {(task.status === 'backlog' || task.status === 'todo') && onDispatch && (
               <button
@@ -330,17 +369,29 @@ function TaskForm({ onSubmit, onCancel }) {
 
 // --------------- Task Detail Dialog ---------------
 
+function formatDurationMs(ms) {
+  if (!ms) return '--';
+  if (ms < 1000) return `${ms}ms`;
+  const s = (ms / 1000).toFixed(1);
+  if (ms < 60000) return `${s}s`;
+  const m = Math.floor(ms / 60000);
+  const rem = Math.floor((ms % 60000) / 1000);
+  return `${m}m ${rem}s`;
+}
+
 function TaskDetailDialog({ task, open, onOpenChange }) {
   if (!task) return null;
   const priority = priorityConfig[task.priority] || priorityConfig.low;
-  const column = COLUMNS.find((c) => c.id === task.status);
+  const column = COLUMNS.find((c) => c.id === resolveColumnId(task.status));
+  const agentResult = parseAgentResult(task.result);
+  const lastRun = task.runHistory?.length > 0 ? task.runHistory[task.runHistory.length - 1] : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
         <DialogTitle>{task.title}</DialogTitle>
         <DialogDescription>
-          Task details and configuration
+          Task details and agent output
         </DialogDescription>
         <div className="space-y-4 pt-2">
           {task.description && (
@@ -349,6 +400,7 @@ function TaskDetailDialog({ task, open, onOpenChange }) {
               <p className="text-sm text-foreground whitespace-pre-wrap">{task.description}</p>
             </div>
           )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Priority</p>
@@ -361,25 +413,72 @@ function TaskDetailDialog({ task, open, onOpenChange }) {
                 <span className="text-sm">{column?.label || task.status}</span>
               </div>
             </div>
-            {task.schedule && (
+            {task.source?.channel && (
               <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Schedule</p>
-                <span className="text-sm flex items-center gap-1">
-                  <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-                  {scheduleLabels[task.schedule] || task.schedule}
-                </span>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Source</p>
+                <span className="text-sm capitalize">{task.source.channel}{task.source.sender ? ` · ${task.source.sender}` : ''}</span>
               </div>
             )}
-            {task.agent && (
+            {task.completedAt && (
               <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Assigned Agent</p>
-                <span className="text-sm flex items-center gap-1">
-                  <User className="h-3.5 w-3.5 text-muted-foreground" />
-                  {task.agent}
-                </span>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Completed</p>
+                <span className="text-sm text-muted-foreground">{new Date(task.completedAt).toLocaleString()}</span>
               </div>
             )}
           </div>
+
+          {/* Agent Result */}
+          {agentResult && (
+            <div>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                <Bot className="h-3.5 w-3.5" />
+                Agent Result
+              </p>
+              <div className="rounded-md border bg-muted/30 px-4 py-3">
+                <p className="text-sm text-foreground whitespace-pre-wrap">{agentResult}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Error */}
+          {task.error && (
+            <div>
+              <p className="text-xs font-medium text-destructive uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                <AlertCircle className="h-3.5 w-3.5" />
+                Error
+              </p>
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3">
+                <p className="text-sm text-destructive">{task.error}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Run History */}
+          {task.runHistory?.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
+                Run History ({task.runHistory.length})
+              </p>
+              <div className="space-y-1.5">
+                {[...task.runHistory].reverse().map((run, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs rounded-md bg-muted/30 px-3 py-2">
+                    {run.success ? (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                    ) : (
+                      <AlertCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />
+                    )}
+                    <span className="text-muted-foreground">
+                      {run.completedAt ? new Date(run.completedAt).toLocaleString() : '--'}
+                    </span>
+                    <span className="ml-auto text-muted-foreground">
+                      {formatDurationMs(run.duration)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {task.createdAt && (
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Created</p>

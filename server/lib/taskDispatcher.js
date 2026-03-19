@@ -171,3 +171,73 @@ export function getActiveRuns() {
   }
   return runs;
 }
+
+// ─── Heartbeat Poller ───
+// Periodically checks for tasks in "todo" status and dispatches them
+// to agents, respecting max concurrency.
+
+let heartbeatInterval = null;
+
+function heartbeatTick() {
+  const settings = readSettings();
+  const maxConcurrent = settings.maxConcurrentTasks || 5;
+  const autoDispatch = settings.autoDispatchTodo !== false; // enabled by default
+
+  if (!autoDispatch) return;
+
+  const tasks = readTasks();
+  const runningCount = tasks.filter(t => t.status === 'in-progress' || t.status === 'running').length;
+  const available = maxConcurrent - runningCount;
+
+  if (available <= 0) return;
+
+  // Find todo tasks, sorted by priority then order
+  const pOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+  const todoTasks = tasks
+    .filter(t => t.status === 'todo' && !t.pickedUp && !activeRuns.has(t.id))
+    .sort((a, b) => {
+      const pa = pOrder[a.priority] ?? 2;
+      const pb = pOrder[b.priority] ?? 2;
+      if (pa !== pb) return pa - pb;
+      return (a.order ?? Infinity) - (b.order ?? Infinity);
+    });
+
+  const toDispatch = todoTasks.slice(0, available);
+  for (const task of toDispatch) {
+    console.log(`  [heartbeat] Auto-dispatching task: ${task.title}`);
+    dispatchTask(task.id);
+  }
+}
+
+export function startHeartbeat() {
+  if (heartbeatInterval) return;
+
+  function scheduleNext() {
+    const settings = readSettings();
+    const intervalSec = parseInt(settings.heartbeatInterval) || 1800; // default 30 minutes
+    const intervalMs = intervalSec * 1000;
+
+    heartbeatInterval = setTimeout(() => {
+      heartbeatTick();
+      heartbeatInterval = null;
+      scheduleNext(); // re-schedule with potentially updated interval
+    }, intervalMs);
+
+    console.log(`  [heartbeat] Next tick in ${intervalSec >= 60 ? `${intervalSec / 60}m` : `${intervalSec}s`}`);
+  }
+
+  // Run first tick after 10s to let server settle
+  setTimeout(() => {
+    heartbeatTick();
+    scheduleNext();
+  }, 10_000);
+
+  console.log('  [heartbeat] Task auto-dispatch enabled');
+}
+
+export function stopHeartbeat() {
+  if (heartbeatInterval) {
+    clearTimeout(heartbeatInterval);
+    heartbeatInterval = null;
+  }
+}

@@ -26,7 +26,7 @@ export function createTask(req, res) {
   try {
     const tasks = readTasks();
     const {
-      title, description, priority, skill, skills,
+      title, description, priority, status: reqStatus, skill, skills,
       schedule, scheduledAt, scheduleEnabled,
     } = req.body;
 
@@ -42,7 +42,7 @@ export function createTask(req, res) {
       priority: priority || 'medium',
       skill: skill || null,
       skills: skills || [],
-      status: 'pending',
+      status: reqStatus || 'pending',
       createdAt: now,
       updatedAt: now,
       completedAt: null,
