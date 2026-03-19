@@ -61,13 +61,6 @@ const TIMEZONES = [
   'Pacific/Auckland',
 ];
 
-const HEARTBEAT_OPTIONS = [
-  { value: '300', label: '5 minutes' },
-  { value: '900', label: '15 minutes' },
-  { value: '1800', label: '30 minutes' },
-  { value: '3600', label: '1 hour' },
-  { value: '7200', label: '2 hours' },
-];
 
 // ---------------------------------------------------------------------------
 // Section wrapper with save state
@@ -128,9 +121,8 @@ export default function SettingsPage() {
   const [timezone, setTimezone] = useState('UTC');
   const [timeFormat, setTimeFormat] = useState('12h');
   const [webhookToken, setWebhookToken] = useState('');
-  const [autoDispatchTodo, setAutoDispatchTodo] = useState(true);
   const [maxConcurrent, setMaxConcurrent] = useState('4');
-  const [heartbeat, setHeartbeat] = useState('1800');
+  const [openclawHeartbeat, setOpenclawHeartbeat] = useState('');
   const [subscriptionProviders, setSubscriptionProviders] = useState([]);
   const [detectedProviders, setDetectedProviders] = useState([]);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -168,14 +160,12 @@ export default function SettingsPage() {
           setGlobalHour12(data.timeFormat === '12h');
         }
         if (data.webhookToken) setWebhookToken(data.webhookToken);
-        if (data.autoDispatchTodo !== undefined) setAutoDispatchTodo(data.autoDispatchTodo);
         if (Array.isArray(data.subscriptionProviders)) {
           setSubscriptionProviders(data.subscriptionProviders);
         } else if (data.subscriptionMode === 'max') {
           setSubscriptionProviders(['anthropic']);
         }
         if (data.maxConcurrentTasks) setMaxConcurrent(String(data.maxConcurrentTasks));
-        if (data.heartbeatInterval) setHeartbeat(String(data.heartbeatInterval));
       })
       .catch(() => {
         if (!cancelled) setSettings({});
@@ -186,10 +176,13 @@ export default function SettingsPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // Fetch detected providers
+  // Fetch detected providers and OpenClaw heartbeat
   useEffect(() => {
     apiGet('/usage/providers').then((data) => {
       if (Array.isArray(data)) setDetectedProviders(data);
+    }).catch(() => {});
+    apiGet('/tasks/heartbeat-info').then((data) => {
+      if (data?.interval) setOpenclawHeartbeat(data.interval);
     }).catch(() => {});
   }, []);
 
@@ -232,8 +225,6 @@ export default function SettingsPage() {
       await apiPost('/settings', {
         section: 'tasks',
         maxConcurrentTasks: parseInt(maxConcurrent, 10),
-        heartbeatInterval: parseInt(heartbeat, 10),
-        autoDispatchTodo,
       });
       setTaskSaved(true);
       setTaskDirty(false);
@@ -243,7 +234,7 @@ export default function SettingsPage() {
     } finally {
       setTaskSaving(false);
     }
-  }, [maxConcurrent, heartbeat, autoDispatchTodo]);
+  }, [maxConcurrent]);
 
   const handleChangePassword = useCallback(async () => {
     setPwError('');
@@ -609,51 +600,15 @@ export default function SettingsPage() {
                 </p>
               </div>
 
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-foreground">
-                  Heartbeat Interval
-                </label>
-                <Select
-                  value={heartbeat}
-                  onValueChange={(val) => {
-                    setHeartbeat(val);
-                    setTaskDirty(true);
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select interval" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {HEARTBEAT_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  How often agents report their status
+              <div className="rounded-md bg-muted/50 px-4 py-3 space-y-1">
+                <p className="text-sm font-medium text-foreground">OpenClaw Heartbeat</p>
+                <p className="text-sm text-foreground">
+                  Every <span className="font-semibold text-primary">{openclawHeartbeat || '...'}</span>
                 </p>
-              </div>
-
-              <div className="flex items-center justify-between rounded-md border px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium text-foreground">Auto-dispatch Todo tasks</p>
-                  <p className="text-xs text-muted-foreground">
-                    Automatically assign agents to tasks in the Todo column every 60 seconds
-                  </p>
-                </div>
-                <Button
-                  variant={autoDispatchTodo ? 'default' : 'outline'}
-                  size="sm"
-                  className="shrink-0"
-                  onClick={() => {
-                    setAutoDispatchTodo(!autoDispatchTodo);
-                    setTaskDirty(true);
-                  }}
-                >
-                  {autoDispatchTodo ? 'Enabled' : 'Disabled'}
-                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Tasks in the Todo column are picked up by agents on the next OpenClaw heartbeat cycle.
+                  To change this interval, update <code className="text-[11px] bg-muted px-1 py-0.5 rounded">agents.defaults.heartbeat.every</code> in your OpenClaw config.
+                </p>
               </div>
 
               <div className="flex justify-end">

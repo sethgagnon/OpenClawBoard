@@ -1,8 +1,10 @@
+import { spawn } from 'child_process';
 import { readTasks, writeTasks } from '../lib/fileStore.js';
 import { readSettings } from '../lib/fileStore.js';
 import { logActivity } from '../lib/fileStore.js';
 import { broadcast } from '../broadcast.js';
 import { invokeOpenclawAgent } from '../lib/openclaw.js';
+import { readOpenclawJson } from '../config.js';
 
 const activeRuns = new Map(); // taskId → { emitter, output }
 
@@ -44,8 +46,11 @@ function updateTask(taskId, updates) {
   return task;
 }
 
+/**
+ * Dispatch a task immediately via `openclaw agent`.
+ * Used when dragging to In Progress or clicking "Run with Agent".
+ */
 export function dispatchTask(taskId) {
-  // Don't double-dispatch
   if (activeRuns.has(taskId)) {
     return { error: 'Task is already running' };
   }
@@ -53,12 +58,12 @@ export function dispatchTask(taskId) {
   const tasks = readTasks();
   const task = tasks.find(t => t.id === taskId);
   if (!task) return { error: 'Task not found' };
-  if (task.status === 'running') return { error: 'Task is already running' };
+  if (task.status === 'in-progress' && task.pickedUp) return { error: 'Task is already running' };
 
   // Check concurrency
   const settings = readSettings();
   const maxConcurrent = settings.maxConcurrentTasks || 5;
-  const runningCount = tasks.filter(t => t.status === 'running').length;
+  const runningCount = tasks.filter(t => t.status === 'in-progress' && t.pickedUp).length;
   if (runningCount >= maxConcurrent) {
     return { error: `Max concurrency reached (${maxConcurrent}). Wait for a running task to finish.` };
   }
@@ -86,19 +91,11 @@ export function dispatchTask(taskId) {
 
   emitter.on('data', (chunk) => {
     run.output += chunk;
-    broadcast('task:progress', {
-      taskId,
-      chunk,
-      outputLength: run.output.length,
-    });
+    broadcast('task:progress', { taskId, chunk, outputLength: run.output.length });
   });
 
   emitter.on('error', (errMsg) => {
-    // stderr output — log but don't fail yet (agent may still complete)
-    broadcast('task:progress', {
-      taskId,
-      stderr: errMsg,
-    });
+    broadcast('task:progress', { taskId, stderr: errMsg });
   });
 
   emitter.on('close', ({ code }) => {
@@ -115,7 +112,6 @@ export function dispatchTask(taskId) {
     });
 
     if (completedTask) {
-      // Record in run history
       const tasks = readTasks();
       const idx = tasks.findIndex(t => t.id === taskId);
       if (idx !== -1) {
@@ -145,6 +141,44 @@ export function dispatchTask(taskId) {
   return { ok: true, task: updated };
 }
 
+/**
+ * Enqueue a task as an OpenClaw system event for pickup on the next heartbeat.
+ * Used when a task is moved to the Todo column.
+ */
+export function enqueueForHeartbeat(taskId) {
+  const tasks = readTasks();
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) return { error: 'Task not found' };
+
+  const prompt = buildTaskPrompt(task);
+
+  // Fire and forget — enqueue via openclaw system event
+  try {
+    const proc = spawn('openclaw', [
+      'system', 'event',
+      '--text', prompt,
+      '--mode', 'next-heartbeat',
+      '--json',
+    ], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env },
+    });
+
+    proc.on('close', (code) => {
+      if (code === 0) {
+        logActivity('agent', 'task.enqueued_heartbeat', { taskId, title: task.title });
+        broadcast('task:enqueued', { taskId, mode: 'next-heartbeat' });
+      } else {
+        console.warn(`  [heartbeat] Failed to enqueue task ${task.title}: exit code ${code}`);
+      }
+    });
+  } catch (err) {
+    return { error: `Failed to enqueue: ${err.message}` };
+  }
+
+  return { ok: true, message: 'Task enqueued for next OpenClaw heartbeat' };
+}
+
 export function cancelTask(taskId) {
   const run = activeRuns.get(taskId);
   if (!run) return { error: 'Task is not currently running' };
@@ -172,72 +206,11 @@ export function getActiveRuns() {
   return runs;
 }
 
-// ─── Heartbeat Poller ───
-// Periodically checks for tasks in "todo" status and dispatches them
-// to agents, respecting max concurrency.
-
-let heartbeatInterval = null;
-
-function heartbeatTick() {
-  const settings = readSettings();
-  const maxConcurrent = settings.maxConcurrentTasks || 5;
-  const autoDispatch = settings.autoDispatchTodo !== false; // enabled by default
-
-  if (!autoDispatch) return;
-
-  const tasks = readTasks();
-  const runningCount = tasks.filter(t => t.status === 'in-progress' || t.status === 'running').length;
-  const available = maxConcurrent - runningCount;
-
-  if (available <= 0) return;
-
-  // Find todo tasks, sorted by priority then order
-  const pOrder = { critical: 0, high: 1, medium: 2, low: 3 };
-  const todoTasks = tasks
-    .filter(t => t.status === 'todo' && !t.pickedUp && !activeRuns.has(t.id))
-    .sort((a, b) => {
-      const pa = pOrder[a.priority] ?? 2;
-      const pb = pOrder[b.priority] ?? 2;
-      if (pa !== pb) return pa - pb;
-      return (a.order ?? Infinity) - (b.order ?? Infinity);
-    });
-
-  const toDispatch = todoTasks.slice(0, available);
-  for (const task of toDispatch) {
-    console.log(`  [heartbeat] Auto-dispatching task: ${task.title}`);
-    dispatchTask(task.id);
-  }
-}
-
-export function startHeartbeat() {
-  if (heartbeatInterval) return;
-
-  function scheduleNext() {
-    const settings = readSettings();
-    const intervalSec = parseInt(settings.heartbeatInterval) || 1800; // default 30 minutes
-    const intervalMs = intervalSec * 1000;
-
-    heartbeatInterval = setTimeout(() => {
-      heartbeatTick();
-      heartbeatInterval = null;
-      scheduleNext(); // re-schedule with potentially updated interval
-    }, intervalMs);
-
-    console.log(`  [heartbeat] Next tick in ${intervalSec >= 60 ? `${intervalSec / 60}m` : `${intervalSec}s`}`);
-  }
-
-  // Run first tick after 10s to let server settle
-  setTimeout(() => {
-    heartbeatTick();
-    scheduleNext();
-  }, 10_000);
-
-  console.log('  [heartbeat] Task auto-dispatch enabled');
-}
-
-export function stopHeartbeat() {
-  if (heartbeatInterval) {
-    clearTimeout(heartbeatInterval);
-    heartbeatInterval = null;
-  }
+/**
+ * Read the OpenClaw heartbeat interval from openclaw.json.
+ */
+export function getOpenclawHeartbeatInterval() {
+  const cfg = readOpenclawJson();
+  const every = cfg?.agents?.defaults?.heartbeat?.every;
+  return every || '120m';
 }

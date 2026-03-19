@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import path from 'path';
 import { __dirname } from './config.js';
-import { dispatchTask, cancelTask, getActiveRuns } from './lib/taskDispatcher.js';
+import { dispatchTask, cancelTask, getActiveRuns, getOpenclawHeartbeatInterval } from './lib/taskDispatcher.js';
 
 // Controllers
 import { getSystemMetrics } from './controllers/system.js';
@@ -70,6 +70,9 @@ router.post('/api/tasks/:id/cancel', (req, res) => {
 });
 router.get('/api/tasks/active-runs', (req, res) => {
   res.json(getActiveRuns());
+});
+router.get('/api/tasks/heartbeat-info', (req, res) => {
+  res.json({ interval: getOpenclawHeartbeatInterval() });
 });
 
 // Usage / Cost
