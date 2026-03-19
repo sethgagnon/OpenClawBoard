@@ -12,6 +12,9 @@ import {
   Check,
   ExternalLink,
   CreditCard,
+  Webhook,
+  Copy,
+  RefreshCw,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -58,13 +61,6 @@ const TIMEZONES = [
   'Pacific/Auckland',
 ];
 
-const HEARTBEAT_OPTIONS = [
-  { value: '15', label: '15 seconds' },
-  { value: '30', label: '30 seconds' },
-  { value: '60', label: '1 minute' },
-  { value: '120', label: '2 minutes' },
-  { value: '300', label: '5 minutes' },
-];
 
 // ---------------------------------------------------------------------------
 // Section wrapper with save state
@@ -124,8 +120,9 @@ export default function SettingsPage() {
   // Form state
   const [timezone, setTimezone] = useState('UTC');
   const [timeFormat, setTimeFormat] = useState('12h');
+  const [webhookToken, setWebhookToken] = useState('');
   const [maxConcurrent, setMaxConcurrent] = useState('4');
-  const [heartbeat, setHeartbeat] = useState('60');
+  const [openclawHeartbeat, setOpenclawHeartbeat] = useState('');
   const [subscriptionProviders, setSubscriptionProviders] = useState([]);
   const [detectedProviders, setDetectedProviders] = useState([]);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -162,13 +159,13 @@ export default function SettingsPage() {
           setTimeFormat(data.timeFormat);
           setGlobalHour12(data.timeFormat === '12h');
         }
+        if (data.webhookToken) setWebhookToken(data.webhookToken);
         if (Array.isArray(data.subscriptionProviders)) {
           setSubscriptionProviders(data.subscriptionProviders);
         } else if (data.subscriptionMode === 'max') {
           setSubscriptionProviders(['anthropic']);
         }
         if (data.maxConcurrentTasks) setMaxConcurrent(String(data.maxConcurrentTasks));
-        if (data.heartbeatInterval) setHeartbeat(String(data.heartbeatInterval));
       })
       .catch(() => {
         if (!cancelled) setSettings({});
@@ -179,10 +176,13 @@ export default function SettingsPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // Fetch detected providers
+  // Fetch detected providers and OpenClaw heartbeat
   useEffect(() => {
     apiGet('/usage/providers').then((data) => {
       if (Array.isArray(data)) setDetectedProviders(data);
+    }).catch(() => {});
+    apiGet('/tasks/heartbeat-info').then((data) => {
+      if (data?.interval) setOpenclawHeartbeat(data.interval);
     }).catch(() => {});
   }, []);
 
@@ -225,7 +225,6 @@ export default function SettingsPage() {
       await apiPost('/settings', {
         section: 'tasks',
         maxConcurrentTasks: parseInt(maxConcurrent, 10),
-        heartbeatInterval: parseInt(heartbeat, 10),
       });
       setTaskSaved(true);
       setTaskDirty(false);
@@ -235,7 +234,7 @@ export default function SettingsPage() {
     } finally {
       setTaskSaving(false);
     }
-  }, [maxConcurrent, heartbeat]);
+  }, [maxConcurrent]);
 
   const handleChangePassword = useCallback(async () => {
     setPwError('');
@@ -483,7 +482,84 @@ export default function SettingsPage() {
         </Card>
 
         {/* ----------------------------------------------------------------- */}
-        {/* 4. Task Settings */}
+        {/* 4. Webhook / Channel Integration */}
+        {/* ----------------------------------------------------------------- */}
+        <Card>
+          <CardHeader className="pb-4">
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary">
+                <Webhook className="h-4 w-4" />
+              </div>
+              <div>
+                <CardTitle className="text-base">Webhook & Channels</CardTitle>
+                <CardDescription>Create tasks from Telegram, WhatsApp, Discord, and other channels</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-foreground">
+                  Webhook Token
+                </label>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Use this token to authenticate webhook requests that create tasks from external channels.
+                </p>
+                {webhookToken ? (
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 rounded-md bg-muted px-3 py-2 text-xs font-mono text-foreground break-all">
+                      {webhookToken}
+                    </code>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => { navigator.clipboard.writeText(webhookToken); }}
+                      title="Copy token"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No token generated yet.</p>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 gap-1.5"
+                  onClick={async () => {
+                    const token = Array.from(crypto.getRandomValues(new Uint8Array(24)))
+                      .map(b => b.toString(16).padStart(2, '0')).join('');
+                    setWebhookToken(token);
+                    await apiPost('/settings', { webhookToken: token });
+                  }}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  {webhookToken ? 'Regenerate Token' : 'Generate Token'}
+                </Button>
+              </div>
+
+              <div className="rounded-md bg-muted/50 px-4 py-3 space-y-2">
+                <p className="text-xs font-medium text-foreground">Usage Example</p>
+                <code className="block text-[11px] font-mono text-muted-foreground whitespace-pre-wrap break-all">
+{`curl -X POST http://localhost:3333/api/webhook/tasks \\
+  -H "Authorization: Bearer YOUR_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{"title":"Fix login bug","priority":"high","channel":"telegram","sender":"Seth"}'`}
+                </code>
+                <p className="text-[11px] text-muted-foreground mt-2">
+                  Supported channels: Telegram, WhatsApp, Discord, Slack, Signal, and{' '}
+                  <a href="https://docs.openclaw.ai/channels" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                    17 more
+                  </a>.
+                  Add <code className="text-[10px]">"autoDispatch": true</code> to immediately assign an agent.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* ----------------------------------------------------------------- */}
+        {/* 5. Task Settings */}
         {/* ----------------------------------------------------------------- */}
         <Card>
           <CardHeader className="pb-4">
@@ -492,8 +568,8 @@ export default function SettingsPage() {
                 <Cpu className="h-4 w-4" />
               </div>
               <div>
-                <CardTitle className="text-base">Task Settings</CardTitle>
-                <CardDescription>Configure task execution behavior</CardDescription>
+                <CardTitle className="text-base">Kanban Task Settings</CardTitle>
+                <CardDescription>Configure task execution and agent dispatch behavior</CardDescription>
               </div>
             </div>
           </CardHeader>
@@ -524,30 +600,14 @@ export default function SettingsPage() {
                 </p>
               </div>
 
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-foreground">
-                  Heartbeat Interval
-                </label>
-                <Select
-                  value={heartbeat}
-                  onValueChange={(val) => {
-                    setHeartbeat(val);
-                    setTaskDirty(true);
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select interval" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {HEARTBEAT_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  How often agents report their status
+              <div className="rounded-md bg-muted/50 px-4 py-3 space-y-1">
+                <p className="text-sm font-medium text-foreground">OpenClaw Heartbeat</p>
+                <p className="text-sm text-foreground">
+                  Every <span className="font-semibold text-primary">{openclawHeartbeat || '...'}</span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Tasks in the Todo column are picked up by agents on the next OpenClaw heartbeat cycle.
+                  To change this interval, update <code className="text-[11px] bg-muted px-1 py-0.5 rounded">agents.defaults.heartbeat.every</code> in your OpenClaw config.
                 </p>
               </div>
 

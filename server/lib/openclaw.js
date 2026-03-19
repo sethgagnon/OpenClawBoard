@@ -19,12 +19,13 @@ import { EventEmitter } from 'events';
  * @returns {EventEmitter & { kill: () => void }}
  */
 export function invokeOpenclawAgent(prompt, options = {}) {
-  const { cwd, timeout = 120_000 } = options;
+  const { cwd, timeout = 600_000 } = options;
   const emitter = new EventEmitter();
 
   let proc;
   try {
-    proc = spawn('openclaw', ['chat', '--message', prompt], {
+    const agent = options.agent || 'main';
+    proc = spawn('openclaw', ['agent', '--agent', agent, '--message', prompt, '--json'], {
       cwd: cwd || process.cwd(),
       env: { ...process.env },
       stdio: ['ignore', 'pipe', 'pipe'],

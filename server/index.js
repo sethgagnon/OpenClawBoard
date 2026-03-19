@@ -26,4 +26,5 @@ server.listen(PORT, HOST, () => {
   console.log(`  OpenClaw dir: \x1b[90m${OPENCLAW_DIR}\x1b[0m`);
   console.log(`  Data dir:     \x1b[90m${DATA_DIR}\x1b[0m`);
   console.log('');
+
 });
