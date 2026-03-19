@@ -525,12 +525,19 @@ export default function KanbanPage() {
 
     // Optimistic update already happened in handleDragOver — now persist
     try {
-      await apiPut(`/tasks/${taskId}`, { status: destColumn });
-    } catch {
+      // If dragged to In Progress, dispatch to agent instead of just updating status
+      if (destColumn === 'in-progress' && originalColumn !== 'in-progress') {
+        await apiPost(`/tasks/${taskId}/dispatch`);
+      } else {
+        await apiPut(`/tasks/${taskId}`, { status: destColumn });
+      }
+    } catch (err) {
       // Revert on failure
       setTasks((prev) =>
         prev.map((t) => (t.id === taskId ? { ...t, status: draggedTask._originalStatus } : t))
       );
+      setError(err.message);
+      setTimeout(() => setError(null), 5000);
     }
   };
 

@@ -63,9 +63,9 @@ export function dispatchTask(taskId) {
     return { error: `Max concurrency reached (${maxConcurrent}). Wait for a running task to finish.` };
   }
 
-  // Move to running
+  // Move to in-progress
   const updated = updateTask(taskId, {
-    status: 'running',
+    status: 'in-progress',
     startedAt: new Date().toISOString(),
     pickedUp: true,
     subagentId: 'openclawboard-dispatch',
