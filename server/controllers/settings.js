@@ -5,7 +5,7 @@ import { broadcast } from '../broadcast.js';
 const ALLOWED_KEYS = new Set([
   'timezone', 'theme', 'maxConcurrency', 'autoRefresh', 'refreshInterval',
   'notifications', 'compactMode', 'defaultPriority', 'defaultView',
-  'terminalEnabled', 'costAlertThreshold', 'subscriptionMode', 'subscriptionProviders', 'timeFormat',
+  'terminalEnabled', 'costAlertThreshold', 'subscriptionMode', 'subscriptionProviders', 'timeFormat', 'webhookToken',
 ]);
 
 export function getSettings(req, res) {

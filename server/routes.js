@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import path from 'path';
 import { __dirname } from './config.js';
+import { dispatchTask, cancelTask, getActiveRuns } from './lib/taskDispatcher.js';
 
 // Controllers
 import { getSystemMetrics } from './controllers/system.js';
@@ -55,6 +56,21 @@ router.post('/api/tasks/:id/schedule-toggle', toggleSchedule);
 router.delete('/api/tasks/:id', deleteTask);
 router.post('/api/tasks/bulk-delete', bulkDeleteTasks);
 router.get('/api/calendar', getCalendar);
+
+// Task Dispatch (agent execution)
+router.post('/api/tasks/:id/dispatch', (req, res) => {
+  const result = dispatchTask(req.params.id);
+  if (result.error) return res.status(400).json(result);
+  res.json(result);
+});
+router.post('/api/tasks/:id/cancel', (req, res) => {
+  const result = cancelTask(req.params.id);
+  if (result.error) return res.status(400).json(result);
+  res.json(result);
+});
+router.get('/api/tasks/active-runs', (req, res) => {
+  res.json(getActiveRuns());
+});
 
 // Usage / Cost
 router.get('/api/usage', getUsage);

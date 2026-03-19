@@ -15,7 +15,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   Plus, GripVertical, Calendar, User, Clock,
-  AlertCircle, ChevronRight,
+  AlertCircle, ChevronRight, Bot, Loader2, Square, Zap,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -39,6 +39,18 @@ const COLUMNS = [
   { id: 'done', label: 'Done', color: 'bg-emerald-500' },
 ];
 
+// Map backend statuses to Kanban column IDs
+function resolveColumnId(status) {
+  switch (status) {
+    case 'pending': return 'backlog';
+    case 'queued': return 'todo';
+    case 'running': return 'in-progress';
+    case 'completed': return 'done';
+    case 'failed': return 'backlog';
+    default: return status; // already a column ID
+  }
+}
+
 const priorityConfig = {
   high: { variant: 'destructive', label: 'High' },
   medium: { variant: 'warning', label: 'Medium' },
@@ -53,7 +65,7 @@ const scheduleLabels = {
 
 // --------------- Task Card (Sortable) ---------------
 
-function SortableTaskCard({ task, onClick }) {
+function SortableTaskCard({ task, onClick, onDispatch, onCancel }) {
   const {
     attributes,
     listeners,
@@ -71,19 +83,21 @@ function SortableTaskCard({ task, onClick }) {
 
   return (
     <div ref={setNodeRef} style={style} {...attributes}>
-      <TaskCardContent task={task} listeners={listeners} onClick={onClick} />
+      <TaskCardContent task={task} listeners={listeners} onClick={onClick} onDispatch={onDispatch} onCancel={onCancel} />
     </div>
   );
 }
 
-function TaskCardContent({ task, listeners, onClick, overlay }) {
+function TaskCardContent({ task, listeners, onClick, overlay, onDispatch, onCancel }) {
   const priority = priorityConfig[task.priority] || priorityConfig.low;
+  const isRunning = task.status === 'in-progress' && task.pickedUp;
 
   return (
     <Card
       className={cn(
         'border-border/50 bg-card/80 hover:bg-card hover:border-purple-500/20 transition-all cursor-pointer group',
-        overlay && 'shadow-2xl border-purple-500/30 rotate-2'
+        overlay && 'shadow-2xl border-purple-500/30 rotate-2',
+        isRunning && 'border-amber-500/30 bg-amber-500/5'
       )}
       onClick={onClick}
     >
@@ -102,10 +116,21 @@ function TaskCardContent({ task, listeners, onClick, overlay }) {
             <p className="text-sm font-medium text-foreground leading-snug truncate">
               {task.title}
             </p>
+            {task.source?.channel && (
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                via {task.source.channel}{task.source.sender ? ` · ${task.source.sender}` : ''}
+              </p>
+            )}
             <div className="flex items-center gap-2 mt-2 flex-wrap">
               <Badge variant={priority.variant} className="text-[10px]">
                 {priority.label}
               </Badge>
+              {isRunning && (
+                <Badge variant="warning" className="text-[10px] flex items-center gap-1">
+                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                  Agent working
+                </Badge>
+              )}
               {task.schedule && (
                 <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
                   <Calendar className="h-3 w-3" />
@@ -119,6 +144,25 @@ function TaskCardContent({ task, listeners, onClick, overlay }) {
                 </span>
               )}
             </div>
+            {/* Dispatch / Cancel buttons */}
+            {(task.status === 'backlog' || task.status === 'todo') && onDispatch && (
+              <button
+                className="mt-2 flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
+                onClick={(e) => { e.stopPropagation(); onDispatch(task.id); }}
+              >
+                <Bot className="h-3 w-3" />
+                Run with Agent
+              </button>
+            )}
+            {isRunning && onCancel && (
+              <button
+                className="mt-2 flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-1 text-[11px] font-medium text-destructive transition-colors hover:bg-destructive/20"
+                onClick={(e) => { e.stopPropagation(); onCancel(task.id); }}
+              >
+                <Square className="h-3 w-3" />
+                Cancel
+              </button>
+            )}
           </div>
         </div>
       </CardContent>
@@ -128,7 +172,7 @@ function TaskCardContent({ task, listeners, onClick, overlay }) {
 
 // --------------- Column ---------------
 
-function KanbanColumn({ column, tasks, onTaskClick }) {
+function KanbanColumn({ column, tasks, onTaskClick, onDispatch, onCancel }) {
   const taskIds = tasks.map((t) => t.id);
 
   return (
@@ -152,6 +196,8 @@ function KanbanColumn({ column, tasks, onTaskClick }) {
                 key={task.id}
                 task={task}
                 onClick={() => onTaskClick(task)}
+                onDispatch={onDispatch}
+                onCancel={onCancel}
               />
             ))
           )}
@@ -427,15 +473,12 @@ export default function KanbanPage() {
 
   const tasksByColumn = {};
   for (const col of COLUMNS) {
-    tasksByColumn[col.id] = tasks.filter((t) => t.status === col.id);
+    tasksByColumn[col.id] = tasks.filter((t) => resolveColumnId(t.status) === col.id);
   }
 
   function findColumnForTask(taskId) {
-    for (const col of COLUMNS) {
-      if (tasksByColumn[col.id].some((t) => t.id === taskId)) {
-        return col.id;
-      }
-    }
+    const task = tasks.find((t) => t.id === taskId);
+    if (task) return resolveColumnId(task.status);
     return null;
   }
 
@@ -512,6 +555,24 @@ export default function KanbanPage() {
     setDetailOpen(true);
   };
 
+  const handleDispatch = async (taskId) => {
+    try {
+      await apiPost(`/tasks/${taskId}/dispatch`);
+    } catch (err) {
+      setError(err.message);
+      setTimeout(() => setError(null), 5000);
+    }
+  };
+
+  const handleCancel = async (taskId) => {
+    try {
+      await apiPost(`/tasks/${taskId}/cancel`);
+    } catch (err) {
+      setError(err.message);
+      setTimeout(() => setError(null), 5000);
+    }
+  };
+
   return (
     <div className="px-3 py-4 sm:p-6 max-w-full mx-auto space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -550,24 +611,6 @@ export default function KanbanPage() {
 
       {loading ? (
         <BoardSkeleton />
-      ) : tasks.length === 0 && !error ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <div className="h-16 w-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
-            <ChevronRight className="h-8 w-8 text-muted-foreground" />
-          </div>
-          <h3 className="text-lg font-semibold text-foreground">No tasks yet</h3>
-          <p className="text-sm text-muted-foreground mt-1 max-w-sm">
-            Create your first task to get started with the Kanban board.
-          </p>
-          <Button
-            size="sm"
-            className="mt-4 gap-1.5"
-            onClick={() => setCreateOpen(true)}
-          >
-            <Plus className="h-4 w-4" />
-            Create Task
-          </Button>
-        </div>
       ) : (
         <DndContext
           sensors={sensors}
@@ -583,13 +626,15 @@ export default function KanbanPage() {
                 column={column}
                 tasks={tasksByColumn[column.id]}
                 onTaskClick={handleTaskClick}
+                onDispatch={handleDispatch}
+                onCancel={handleCancel}
               />
             ))}
           </div>
           <DragOverlay>
             {activeTask ? (
               <div className="w-[264px]">
-                <TaskCardContent task={activeTask} overlay />
+                <TaskCardContent task={activeTask} overlay onDispatch={null} onCancel={null} />
               </div>
             ) : null}
           </DragOverlay>
