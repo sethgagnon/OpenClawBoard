@@ -19,6 +19,9 @@ const SkillsPage = lazy(() => import('@/pages/SkillsPage'));
 const SuggestionsPage = lazy(() => import('@/pages/SuggestionsPage'));
 const TerminalPage = lazy(() => import('@/pages/TerminalPage'));
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
+const AutomationsPage = lazy(() => import('@/pages/AutomationsPage'));
+const ImportPage = lazy(() => import('@/pages/ImportPage'));
+const MigrationPage = lazy(() => import('@/pages/MigrationPage'));
 const LoginPage = lazy(() => import('@/pages/LoginPage'));
 const SetupPage = lazy(() => import('@/pages/SetupPage'));
 
@@ -64,6 +67,9 @@ export default function App() {
           <Route path="/agents/:name/sessions/:id" element={<SessionDetailPage />} />
           <Route path="/cost" element={<CostPage />} />
           <Route path="/cron" element={<CronPage />} />
+          <Route path="/automations" element={<AutomationsPage />} />
+          <Route path="/automations/:id" element={<MigrationPage />} />
+          <Route path="/import/:platform" element={<ImportPage />} />
           <Route path="/kanban" element={<KanbanPage />} />
           <Route path="/activity" element={<ActivityPage />} />
           <Route path="/memory" element={<MemoryPage />} />
