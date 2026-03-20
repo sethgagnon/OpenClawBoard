@@ -127,7 +127,7 @@ export default function SessionDetailPage() {
         variant="ghost"
         size="sm"
         className="gap-1.5 text-muted-foreground hover:text-foreground -ml-2"
-        onClick={() => navigate(`/agents/${encodeURIComponent(name)}`)}
+        onClick={() => navigate(`/agentcare/agents/${encodeURIComponent(name)}`)}
       >
         <ArrowLeft className="h-4 w-4" />
         Back to {decodeURIComponent(name)}

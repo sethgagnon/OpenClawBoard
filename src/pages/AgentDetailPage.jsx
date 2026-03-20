@@ -97,7 +97,7 @@ export default function AgentDetailPage() {
         variant="ghost"
         size="sm"
         className="gap-1.5 text-muted-foreground hover:text-foreground -ml-2"
-        onClick={() => navigate('/agents')}
+        onClick={() => navigate('/agentcare/agents')}
       >
         <ArrowLeft className="h-4 w-4" />
         Back to Agents
@@ -192,7 +192,7 @@ export default function AgentDetailPage() {
                     <tr
                       key={session.id}
                       className="border-b border-border/30 hover:bg-muted/30 cursor-pointer transition-colors"
-                      onClick={() => navigate(`/agents/${encodeURIComponent(name)}/sessions/${session.id}`)}
+                      onClick={() => navigate(`/agentcare/agents/${encodeURIComponent(name)}/sessions/${session.id}`)}
                     >
                       <td className="py-3 px-4 font-mono text-xs text-purple-400">
                         {String(session.id).slice(0, 8)}...

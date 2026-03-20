@@ -80,7 +80,7 @@ const ACTION_ROUTES = {
   'adjust-cron': '/cron',
   'change-model': '/settings',
   'config-change': '/settings',
-  'view-agents': '/agents',
+  'view-agents': '/agentcare/agents',
   'view-files': '/files',
 };
 

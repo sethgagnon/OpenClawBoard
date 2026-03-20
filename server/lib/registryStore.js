@@ -22,3 +22,7 @@ export function setAutomations(automations) {
   reg.automations = automations;
   writeRegistry(reg);
 }
+
+// AgentCare aliases
+export const getItems = getAutomations;
+export const setItems = setAutomations;

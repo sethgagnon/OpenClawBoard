@@ -19,8 +19,8 @@ const TYPE_META = {
   'cron-fail': { icon: AlertTriangle, color: 'text-red-400', bg: 'bg-red-400/10', route: '/cron' },
   'cost-threshold': { icon: DollarSign, color: 'text-amber-400', bg: 'bg-amber-400/10', route: '/cost' },
   'cron-success': { icon: Clock, color: 'text-blue-400', bg: 'bg-blue-400/10', route: '/cron' },
-  'agent-error': { icon: Bot, color: 'text-red-400', bg: 'bg-red-400/10', route: '/agents' },
-  'agent-complete': { icon: Bot, color: 'text-emerald-400', bg: 'bg-emerald-400/10', route: '/agents' },
+  'agent-error': { icon: Bot, color: 'text-red-400', bg: 'bg-red-400/10', route: '/agentcare/agents' },
+  'agent-complete': { icon: Bot, color: 'text-emerald-400', bg: 'bg-emerald-400/10', route: '/agentcare/agents' },
   info: { icon: Info, color: 'text-blue-400', bg: 'bg-blue-400/10', route: '/' },
 };
 

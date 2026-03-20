@@ -2,147 +2,27 @@ import fs from 'fs';
 import path from 'path';
 import { OPENCLAW_DIR, WORKSPACE } from '../../config.js';
 import { readJSON } from '../../lib/fileStore.js';
-import { getAutomations, setAutomations } from '../../lib/registryStore.js';
+import { getItems, setItems } from '../../lib/registryStore.js';
 import { logActivity } from '../../lib/fileStore.js';
 import { broadcast } from '../../broadcast.js';
 import { describeSchedule, resolveSchedule } from '../../lib/schedule.js';
+import { scanSkillDirectories } from '../../lib/skillParser.js';
+import { detectProvider } from '../../lib/providers.js';
 
 const CRON_DIR = path.join(OPENCLAW_DIR, 'cron');
 const JOBS_FILE = path.join(CRON_DIR, 'jobs.json');
 const SKILLS_DIR = path.join(WORKSPACE, 'skills');
 const MANAGED_SKILLS_DIR = path.join(OPENCLAW_DIR, 'skills');
-const EXCLUDED = new Set(['node_modules', '.git', '__pycache__', '.venv']);
 
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-// ─── YAML Frontmatter Parser (regex-based, no dependency) ───
-
-function parseFrontmatter(content) {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return { frontmatter: {}, body: content };
-
-  const body = content.slice(match[0].length).trim();
-  const yaml = match[1];
-  const frontmatter = {};
-
-  let currentKey = null;
-  let currentIndent = 0;
-
-  for (const line of yaml.split('\n')) {
-    // Top-level key: value
-    const kvMatch = line.match(/^(\w[\w-]*)\s*:\s*(.*)$/);
-    if (kvMatch) {
-      const [, key, rawVal] = kvMatch;
-      let val = rawVal.trim();
-      // Strip quotes
-      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-        val = val.slice(1, -1);
-      }
-      // Inline array
-      if (val.startsWith('[') && val.endsWith(']')) {
-        val = val.slice(1, -1).split(',').map(s => s.trim().replace(/^['"]|['"]$/g, ''));
-      }
-      // Multi-line indicator
-      if (val === '|' || val === '>') {
-        frontmatter[key] = '';
-        currentKey = key;
-        currentIndent = 2;
-        continue;
-      }
-      frontmatter[key] = val || true;
-      currentKey = null;
-      continue;
-    }
-
-    // Continuation of multi-line value
-    if (currentKey && line.startsWith(' ')) {
-      frontmatter[currentKey] += (frontmatter[currentKey] ? '\n' : '') + line.trim();
-      continue;
-    }
-
-    // Array items (- value)
-    if (currentKey && line.match(/^\s+-\s+/)) {
-      if (!Array.isArray(frontmatter[currentKey])) frontmatter[currentKey] = [];
-      frontmatter[currentKey].push(line.replace(/^\s+-\s+/, '').trim());
-    }
-  }
-
-  return { frontmatter, body };
-}
-
-// ─── Skill Scanner ───
-
 function scanSkills() {
-  const skills = [];
-
-  for (const dir of [SKILLS_DIR, MANAGED_SKILLS_DIR]) {
-    if (!fs.existsSync(dir)) continue;
-
-    try {
-      for (const entry of fs.readdirSync(dir)) {
-        if (EXCLUDED.has(entry) || entry.startsWith('.')) continue;
-        const entryPath = path.join(dir, entry);
-        const stat = fs.statSync(entryPath);
-
-        if (stat.isDirectory()) {
-          // Directory-based skill with SKILL.md
-          const skillFile = path.join(entryPath, 'SKILL.md');
-          if (fs.existsSync(skillFile)) {
-            const content = fs.readFileSync(skillFile, 'utf-8');
-            const { frontmatter, body } = parseFrontmatter(content);
-            const titleMatch = body.match(/^#\s+(.+)/m);
-
-            skills.push({
-              type: 'skill-dir',
-              name: frontmatter.name || entry,
-              title: titleMatch ? titleMatch[1].trim() : frontmatter.name || entry,
-              description: frontmatter.description || '',
-              path: skillFile,
-              dirPath: entryPath,
-              frontmatter,
-              content,
-              source: dir === SKILLS_DIR ? 'workspace' : 'managed',
-            });
-          }
-        } else if (entry.endsWith('.md') && stat.isFile()) {
-          // Flat .md skill
-          const content = fs.readFileSync(entryPath, 'utf-8');
-          const { frontmatter, body } = parseFrontmatter(content);
-          const titleMatch = body.match(/^#\s+(.+)/m);
-          const name = entry.replace(/\.md$/, '');
-
-          skills.push({
-            type: 'skill-md',
-            name: frontmatter.name || name,
-            title: titleMatch ? titleMatch[1].trim() : name,
-            description: frontmatter.description || '',
-            path: entryPath,
-            dirPath: null,
-            frontmatter,
-            content,
-            source: dir === SKILLS_DIR ? 'workspace' : 'managed',
-          });
-        } else if (entry.endsWith('.py') && stat.isFile()) {
-          // Python script skill
-          skills.push({
-            type: 'script',
-            name: entry.replace(/\.py$/, ''),
-            title: entry.replace(/\.py$/, '').replace(/-/g, ' '),
-            description: `Python script: ${entry}`,
-            path: entryPath,
-            dirPath: null,
-            frontmatter: {},
-            content: null,
-            source: dir === SKILLS_DIR ? 'workspace' : 'managed',
-          });
-        }
-      }
-    } catch {}
-  }
-
-  return skills;
+  return scanSkillDirectories([
+    { dir: SKILLS_DIR, source: 'workspace' },
+    { dir: MANAGED_SKILLS_DIR, source: 'managed' },
+  ]);
 }
 
 // ─── Cron Job Loader ───
@@ -202,7 +82,7 @@ export function scanOpenClaw(req, res) {
   try {
     const jobs = loadJobs();
     const skills = scanSkills();
-    const existing = getAutomations();
+    const existing = getItems();
 
     // Build a set of already-imported cron keys and skill paths
     const importedCronKeys = new Set();
@@ -231,6 +111,8 @@ export function scanOpenClaw(req, res) {
         _skillContent: matchedSkill?.content || null,
         name: job.name || job.id,
         description: job.description || job.payload?.text?.slice(0, 200) || '',
+        kind: 'scheduled-automation',
+        provider: 'openclaw',
         category: 'scheduled-automation',
         schedule: expr ? {
           cron: expr,
@@ -268,6 +150,8 @@ export function scanOpenClaw(req, res) {
         _skillContent: skill.content,
         name: skill.name,
         description: skill.description || skill.title || '',
+        kind: 'skill',
+        provider: 'openclaw',
         category: skill.type === 'script' ? 'script' : 'skill',
         schedule: null,
         tags: [],
@@ -308,7 +192,7 @@ export function confirmImport(req, res) {
       return res.status(400).json({ error: 'selected must be a non-empty array' });
     }
 
-    const items = getAutomations();
+    const items = getItems();
     const now = new Date().toISOString();
     const imported = [];
 
@@ -333,6 +217,8 @@ export function confirmImport(req, res) {
         id,
         name: entry.name,
         description: entry.description,
+        kind: entry.kind || 'skill',
+        provider: entry.provider || 'openclaw',
         category: entry.category || 'general',
         schedule: entry.schedule || null,
         inputs: entry.inputs || [],
@@ -348,7 +234,7 @@ export function confirmImport(req, res) {
       imported.push(item);
     }
 
-    setAutomations(items);
+    setItems(items);
 
     logActivity('user', 'registry.imported', { platform: 'openclaw', count: imported.length });
     broadcast('registry:imported', { platform: 'openclaw', count: imported.length });

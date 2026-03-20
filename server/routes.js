@@ -3,16 +3,23 @@ import path from 'path';
 import { __dirname } from './config.js';
 import { dispatchTask, cancelTask, getActiveRuns, getOpenclawHeartbeatInterval } from './lib/taskDispatcher.js';
 
-// Registry
+// AgentCare
 import {
-  listPlatforms, listAutomations, getAutomation, createAutomation,
-  updateAutomation, deleteAutomation, getRegistryStats,
-} from './controllers/registry.js';
-import { importStatus, scanOpenClaw, confirmImport } from './controllers/importers/openclaw.js';
+  listProviders, getDashboard, listItems, getItem, createItem,
+  updateItem, deleteItem, getInsightsInventory, getInsightsHealth, getInsightsUsage,
+} from './controllers/agentcare.js';
 import {
-  generateExport, getSkillArtifact, getScheduledTaskArtifact,
-  getDispatchArtifact, getGapArtifact, saveSkillFile,
-} from './controllers/exporters/claude-desktop.js';
+  importStatus as openclawImportStatus,
+  scanOpenClaw, confirmImport as openclawConfirmImport,
+} from './controllers/importers/openclaw.js';
+import {
+  importStatus as claudeDesktopImportStatus,
+  scanClaudeDesktop, confirmImport as claudeDesktopConfirmImport,
+} from './controllers/importers/claude-desktop.js';
+import {
+  importStatus as claudeCodeImportStatus,
+  scanClaudeCode, confirmImport as claudeCodeConfirmImport,
+} from './controllers/importers/claude-code.js';
 
 // Controllers
 import { getSystemMetrics } from './controllers/system.js';
@@ -150,29 +157,32 @@ router.post('/api/terminal/exec', execTerminalCommand);
 router.get('/api/settings', getSettings);
 router.post('/api/settings', postSettings);
 
-// Platforms
-router.get('/api/platforms', listPlatforms);
-
-// Registry
-router.get('/api/registry/stats', getRegistryStats);
-router.get('/api/registry', listAutomations);
-router.get('/api/registry/:id', getAutomation);
-router.post('/api/registry', createAutomation);
-router.put('/api/registry/:id', updateAutomation);
-router.delete('/api/registry/:id', deleteAutomation);
+// AgentCare
+router.get('/api/agentcare/providers', listProviders);
+router.get('/api/agentcare/dashboard', getDashboard);
+router.get('/api/agentcare/items', listItems);
+router.get('/api/agentcare/items/:id', getItem);
+router.post('/api/agentcare/items', createItem);
+router.put('/api/agentcare/items/:id', updateItem);
+router.delete('/api/agentcare/items/:id', deleteItem);
+router.get('/api/agentcare/insights/inventory', getInsightsInventory);
+router.get('/api/agentcare/insights/health', getInsightsHealth);
+router.get('/api/agentcare/insights/usage', getInsightsUsage);
 
 // Import (OpenClaw)
-router.get('/api/import/openclaw/status', importStatus);
+router.get('/api/import/openclaw/status', openclawImportStatus);
 router.post('/api/import/openclaw/scan', scanOpenClaw);
-router.post('/api/import/openclaw/confirm', confirmImport);
+router.post('/api/import/openclaw/confirm', openclawConfirmImport);
 
-// Export (Claude Desktop)
-router.post('/api/export/claude-desktop/:id', generateExport);
-router.get('/api/export/claude-desktop/:id/skill', getSkillArtifact);
-router.get('/api/export/claude-desktop/:id/scheduled-task', getScheduledTaskArtifact);
-router.get('/api/export/claude-desktop/:id/dispatch', getDispatchArtifact);
-router.get('/api/export/claude-desktop/:id/gaps', getGapArtifact);
-router.post('/api/export/claude-desktop/:id/save', saveSkillFile);
+// Import (Claude Desktop)
+router.get('/api/import/claude-desktop/status', claudeDesktopImportStatus);
+router.post('/api/import/claude-desktop/scan', scanClaudeDesktop);
+router.post('/api/import/claude-desktop/confirm', claudeDesktopConfirmImport);
+
+// Import (Claude Code)
+router.get('/api/import/claude-code/status', claudeCodeImportStatus);
+router.post('/api/import/claude-code/scan', scanClaudeCode);
+router.post('/api/import/claude-code/confirm', claudeCodeConfirmImport);
 
 // SPA fallback
 router.get('*', (req, res) => {

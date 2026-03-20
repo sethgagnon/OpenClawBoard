@@ -197,7 +197,7 @@ function AgentStatusCard() {
   ).length;
 
   return (
-    <DashboardCard to="/agents" icon={Bot} title="Agents">
+    <DashboardCard to="/agentcare/agents" icon={Bot} title="Agents">
       {loading ? (
         <CardSkeleton />
       ) : (

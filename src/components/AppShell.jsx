@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
-  Bot,
+  HeartHandshake,
   DollarSign,
   Clock,
   Columns3,
@@ -13,7 +13,6 @@ import {
   Lightbulb,
   Terminal,
   Settings,
-  Workflow,
   Menu,
   X,
   Search,
@@ -30,10 +29,9 @@ import NotificationCenter from '@/components/NotificationCenter';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/agents', label: 'Agents', icon: Bot },
+  { to: '/agentcare', label: 'AgentCare', icon: HeartHandshake },
   { to: '/cost', label: 'Cost', icon: DollarSign },
   { to: '/cron', label: 'Cron', icon: Clock },
-  { to: '/automations', label: 'Automations', icon: Workflow },
   { to: '/kanban', label: 'Kanban', icon: Columns3 },
   { to: '/activity', label: 'Activity', icon: Activity },
   { to: '/memory', label: 'Memory', icon: Brain },
